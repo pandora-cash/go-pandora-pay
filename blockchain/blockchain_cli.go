@@ -2,6 +2,7 @@ package blockchain
 
 import (
 	"context"
+	"errors"
 	"pandora-pay/blockchain/blockchain_types"
 	"pandora-pay/blockchain/blocks/block_complete"
 	"pandora-pay/blockchain/data_storage"
@@ -22,6 +23,10 @@ func (self *blockchain) CliNewBlockchainTop(cmd string, ctx context.Context) (er
 		return v < c.Height
 	})
 
+	batches := gui.GUI.OutputReadUint64("Batches. Leave empty for 5000", true, 5000, func(v uint64) bool {
+		return v < c.Height
+	})
+
 	self.mutex.Lock()
 	defer self.mutex.Unlock()
 
@@ -33,73 +38,96 @@ func (self *blockchain) CliNewBlockchainTop(cmd string, ctx context.Context) (er
 
 	mempool.Mempool.SuspendProcessingCn <- struct{}{}
 
-	err = store.StoreBlockchain.DB.Update(func(writer store_db_interface.StoreDBTransactionInterface) (err error) {
+	gui.GUI.OutputWrite("Processing")
 
-		defer func() {
-			if errReturned := recover(); errReturned != nil {
-				err = errReturned.(error)
-			}
-		}()
+	chainData := self.GetChainData()
+	newChainData = chainData.clone()
 
-		chainData := self.GetChainData()
-		newChainData = chainData.clone()
+	workToDo := true
+	for workToDo {
 
-		dataStorage = data_storage.NewDataStorage(writer)
+		if err = store.StoreBlockchain.DB.Update(func(writer store_db_interface.StoreDBTransactionInterface) (err error) {
 
-		var removedBlocksTransactionsCount uint64
+			defer func() {
+				if errReturned := recover(); errReturned != nil {
+					err = errReturned.(error)
+				}
+			}()
 
-		height := newChainData.Height
-		for height > newTop {
-
-			if allTransactionsChanges, err = self.removeBlockComplete(writer, height-1, removedTxHashes, allTransactionsChanges, dataStorage); err != nil {
-				return
-			}
-			if err = self.deleteUnusedBlocksComplete(writer, height-1, dataStorage); err != nil {
+			if newChainData.Height == newTop {
+				workToDo = false
 				return
 			}
 
-			height--
-		}
+			dataStorage = data_storage.NewDataStorage(writer)
 
-		if err = dataStorage.CommitChanges(); err != nil {
+			var removedBlocksTransactionsCount uint64
+
+			height := newChainData.Height
+			c := uint64(0)
+
+			for height > newTop && (batches == 0 || c < batches) {
+
+				if allTransactionsChanges, err = self.removeBlockComplete(writer, height-1, removedTxHashes, allTransactionsChanges, dataStorage); err != nil {
+					return
+				}
+				if err = self.deleteUnusedBlocksComplete(writer, height-1, dataStorage); err != nil {
+					return
+				}
+
+				height--
+				c++
+
+			}
+
+			gui.GUI.OutputWrite("New Top", height)
+
+			if err = dataStorage.CommitChanges(); err != nil {
+				return
+			}
+
+			removedBlocksTransactionsCount = newChainData.TransactionsCount
+
+			if height == 0 {
+				newChainData = self.createGenesisBlockchainData()
+			} else {
+				newChainData = &BlockchainData{}
+				if err = newChainData.loadBlockchainInfo(writer, height); err != nil {
+					return
+				}
+			}
+
+			//removing unused transactions
+			if config.NODE_PROVIDE_EXTENDED_INFO_APP {
+				removeUnusedTransactions(writer, newChainData.TransactionsCount, removedBlocksTransactionsCount)
+			}
+
+			for _, change := range allTransactionsChanges {
+				if removedTxHashes[change.TxHashStr] != nil {
+					writer.Delete("tx:" + change.TxHashStr)
+					writer.Delete("txHash:" + change.TxHashStr)
+					writer.Delete("txBlock:" + change.TxHashStr)
+				}
+			}
+
+			if config.NODE_PROVIDE_EXTENDED_INFO_APP {
+				removeTxsInfo(writer, removedTxHashes)
+			}
+
+			if err = self.saveBlockchainHashmaps(dataStorage); err != nil {
+				return
+			}
+
+			if err = newChainData.saveBlockchain(writer); err != nil {
+				return errors.New("Error saving Blockchain " + err.Error())
+			}
+
+			return
+		}); err != nil {
 			return
 		}
 
-		removedBlocksTransactionsCount = newChainData.TransactionsCount
-
-		if height == 0 {
-			gui.GUI.Info("chain.createGenesisBlockchainData called")
-			newChainData = self.createGenesisBlockchainData()
-		} else {
-			newChainData = &BlockchainData{}
-			if err = newChainData.loadBlockchainInfo(writer, height); err != nil {
-				return
-			}
-		}
-
-		//removing unused transactions
-		if config.NODE_PROVIDE_EXTENDED_INFO_APP {
-			removeUnusedTransactions(writer, newChainData.TransactionsCount, removedBlocksTransactionsCount)
-		}
-
-		for _, change := range allTransactionsChanges {
-			if removedTxHashes[change.TxHashStr] != nil {
-				writer.Delete("tx:" + change.TxHashStr)
-				writer.Delete("txHash:" + change.TxHashStr)
-				writer.Delete("txBlock:" + change.TxHashStr)
-			}
-		}
-
-		if config.NODE_PROVIDE_EXTENDED_INFO_APP {
-			removeTxsInfo(writer, removedTxHashes)
-		}
-
-		if err = self.saveBlockchainHashmaps(dataStorage); err != nil {
-			return
-		}
-
-		return
-	})
+	}
 
 	if err == nil && newChainData != nil {
 		self.ChainData.Store(newChainData)
@@ -126,6 +154,8 @@ func (self *blockchain) CliNewBlockchainTop(cmd string, ctx context.Context) (er
 	}
 
 	self.updatesQueue.updatesCn <- update
+
+	gui.GUI.OutputWrite("New Top", newChainData.Height)
 
 	return
 }

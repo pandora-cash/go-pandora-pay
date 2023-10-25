@@ -7,16 +7,21 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/tyler-smith/go-bip32"
+	"golang.org/x/exp/slices"
 	"math/rand"
 	"pandora-pay/address_balance_decrypter"
 	"pandora-pay/addresses"
+	"pandora-pay/blockchain/data_storage"
 	"pandora-pay/blockchain/data_storage/accounts/account"
+	"pandora-pay/blockchain/data_storage/plain_accounts/plain_account"
 	"pandora-pay/blockchain/data_storage/registrations/registration"
 	"pandora-pay/blockchain/forging"
 	"pandora-pay/config/config_nodes"
 	"pandora-pay/config/globals"
 	"pandora-pay/cryptography"
 	"pandora-pay/cryptography/crypto"
+	"pandora-pay/store"
+	"pandora-pay/store/store_db/store_db_interface"
 	"pandora-pay/wallet/wallet_address"
 	"pandora-pay/wallet/wallet_address/shared_staked"
 	"strconv"
@@ -154,7 +159,7 @@ func (self *wallet) ImportSecretKey(name string, secret []byte, staked, spendReq
 		return nil, err
 	}
 
-	return addr, nil
+	return addr.Clone(), nil
 }
 
 func (self *wallet) AddSharedStakedAddress(addr *wallet_address.WalletAddress, lock, hasAccount bool, account *account.Account, reg *registration.Registration, chainHeight uint64) (err error) {
@@ -420,23 +425,26 @@ func (self *wallet) RemoveAddressByIndex(index int, lock bool) (bool, error) {
 		return false, errors.New("Invalid Address Index")
 	}
 
-	adr := self.Addresses[index]
+	addr := self.Addresses[index]
 
 	removing := self.Addresses[index]
 
-	self.Addresses[index] = self.Addresses[len(self.Addresses)-1]
-	self.Addresses = self.Addresses[:len(self.Addresses)-1]
-	delete(self.addressesMap, string(adr.PublicKey))
+	self.Addresses = slices.Delete(self.Addresses, index, index+1) //keep order
+	delete(self.addressesMap, string(addr.PublicKey))
+
+	if index+1 == self.Count && addr.IsMine && addr.SeedIndex+1 == self.SeedIndex {
+		self.SeedIndex -= 1
+	}
 
 	self.Count -= 1
 
 	forging.Forging.Wallet.RemoveWallet(removing.PublicKey, false, nil, nil, 0)
 
 	self.updateWallet()
-	if err := self.saveWallet(index, index+1, self.Count, false); err != nil {
+	if err := self.saveWallet(index, index, self.Count, false); err != nil {
 		return false, err
 	}
-	globals.MainEvents.BroadcastEvent("wallet/removed", adr)
+	globals.MainEvents.BroadcastEvent("wallet/removed", addr)
 
 	return true, nil
 }
@@ -630,6 +638,72 @@ func (self *wallet) SetNonHardening(value bool) {
 	self.Lock.Lock()
 	defer self.Lock.Unlock()
 	self.nonHardening = value
+}
+
+func (self *wallet) ScanAddresses() error {
+
+	self.Lock.Lock()
+	defer self.Lock.Unlock()
+
+	return store.StoreBlockchain.DB.View(func(reader store_db_interface.StoreDBTransactionInterface) (err error) {
+
+		dataStorage := data_storage.NewDataStorage(reader)
+
+		var reg *registration.Registration
+		var plainAcc *plain_account.PlainAccount
+
+		for {
+
+			var addr *addresses.Address
+			if addr, err = self.GenerateNextAddress(false); err != nil {
+				return
+			}
+
+			if reg, err = dataStorage.Regs.Get(string(addr.PublicKey)); err != nil {
+				return
+			}
+
+			if reg != nil {
+				if _, err = self.AddNewAddress(false, "", reg.Staked, reg.SpendPublicKey != nil, true); err != nil {
+					return
+				}
+				continue
+			}
+
+			if plainAcc, err = dataStorage.PlainAccs.Get(string(addr.PublicKey)); err != nil {
+				return
+			}
+
+			if plainAcc != nil {
+				if _, err = self.AddNewAddress(false, "", false, false, true); err != nil {
+					return
+				}
+				continue
+			}
+
+			break
+		}
+
+		for i := len(self.Addresses) - 1; i > 0; i-- {
+			addr := self.Addresses[i]
+
+			if reg, err = dataStorage.Regs.Get(string(addr.PublicKey)); err != nil {
+				return
+			}
+			if plainAcc, err = dataStorage.PlainAccs.Get(string(addr.PublicKey)); err != nil {
+				return
+			}
+			if reg == nil && plainAcc == nil {
+				if _, err = self.RemoveAddressByIndex(i, false); err != nil {
+					return
+				}
+			}
+		}
+
+		return
+
+	})
+
 }
 
 func (self *wallet) Close() {
