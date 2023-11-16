@@ -279,8 +279,6 @@ func (dataStorage *DataStorage) ProceedConditionalPayment(resolution bool, condP
 		return errors.New("pending Future already processed")
 	}
 
-	condPayment.Processed = true
-
 	var acc *account.Account
 	var pendingAmount *crypto.ElGamal
 
@@ -322,6 +320,14 @@ func (dataStorage *DataStorage) ProceedConditionalPayment(resolution bool, condP
 		}
 
 	}
+
+	condPayment.Processed = true
+	condPayment.ReceiverPublicKeys = make([][]byte, 0)
+	condPayment.SenderPublicKeys = make([][]byte, 0)
+	condPayment.SenderAmounts = make([][]byte, 0)
+	condPayment.ReceiverAmounts = make([][]byte, 0)
+	condPayment.MultisigPublicKeys = make([][]byte, 0)
+	condPayment.MultisigThreshold = 0
 
 	return nil
 }

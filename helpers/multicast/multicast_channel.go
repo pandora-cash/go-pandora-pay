@@ -3,12 +3,12 @@ package multicast
 import (
 	"golang.org/x/exp/slices"
 	"pandora-pay/helpers/linked_list"
-	"pandora-pay/helpers/recovery"
+	"pandora-pay/helpers/safe_channel"
 	"sync"
 )
 
 type MulticastChannel[T any] struct {
-	listeners           []chan T
+	listeners           []*safe_channel.SafeChannel[T]
 	queueBroadcastCn    chan T
 	internalBroadcastCn chan T
 	count               int
@@ -16,12 +16,14 @@ type MulticastChannel[T any] struct {
 }
 
 func (self *MulticastChannel[T]) AddListener() chan T {
-	cn := make(chan T)
+
+	safeCn := safe_channel.NewSafeChannel[T](1)
 
 	self.lock.Lock()
 	defer self.lock.Unlock()
-	self.listeners = append(self.listeners, cn)
-	return cn
+	self.listeners = append(self.listeners, safeCn)
+
+	return safeCn.Ch
 }
 
 func (self *MulticastChannel[T]) Broadcast(data T) {
@@ -33,11 +35,12 @@ func (self *MulticastChannel[T]) RemoveChannel(channel chan T) bool {
 	self.lock.Lock()
 	defer self.lock.Unlock()
 
-	x := slices.Index(self.listeners, channel)
-	if x != -1 {
-		close(channel)
-		self.listeners = slices.Delete(self.listeners, x, x+1)
-		return true
+	for i := 0; i < len(self.listeners); i++ {
+		if self.listeners[i].Ch == channel {
+			close(channel)
+			self.listeners = slices.Delete(self.listeners, i, i+1)
+			return true
+		}
 	}
 
 	return false
@@ -49,9 +52,9 @@ func (self *MulticastChannel[T]) CloseAll() {
 	defer self.lock.Unlock()
 
 	for _, cn := range self.listeners {
-		close(cn)
+		cn.Close()
 	}
-	self.listeners = []chan T{}
+	self.listeners = make([]*safe_channel.SafeChannel[T], 0)
 	close(self.internalBroadcastCn)
 }
 
@@ -96,9 +99,7 @@ func (self *MulticastChannel[T]) runInternalBroadcast() {
 		self.lock.RUnlock()
 
 		for _, channel := range listeners {
-			recovery.Safe(func() { //could be closed
-				channel <- data
-			})
+			channel.Write(data)
 		}
 	}
 }
@@ -106,7 +107,7 @@ func (self *MulticastChannel[T]) runInternalBroadcast() {
 func NewMulticastChannel[T any]() *MulticastChannel[T] {
 
 	multicast := &MulticastChannel[T]{
-		[]chan T{},
+		make([]*safe_channel.SafeChannel[T], 0),
 		make(chan T),
 		make(chan T),
 		0,

@@ -9,6 +9,7 @@ import (
 	"pandora-pay/config/config_forging"
 	"pandora-pay/config/config_nodes"
 	"runtime"
+	"strconv"
 	"time"
 )
 
@@ -50,10 +51,11 @@ const (
 	BLOCK_TIME              uint64 = 100 //seconds
 	DIFFICULTY_BLOCK_WINDOW uint64 = 10
 	FORK_MAX_UNCLE_ALLOWED  uint64 = 60
-	FORK_MAX_DOWNLOAD       uint64 = 20
 )
 
 var (
+	BLOCKS_SYNC_MAX_DOWNLOAD uint64 = 20
+
 	NETWORK_SELECTED                 = MAIN_NET_NETWORK_BYTE
 	NETWORK_SELECTED_BYTE_PREFIX     = MAIN_NET_NETWORK_BYTE_PREFIX
 	NETWORK_SELECTED_NAME            = MAIN_NET_NETWORK_NAME
@@ -86,6 +88,10 @@ var (
 
 func InitConfig() (err error) {
 
+	if err = initNetworkConfig(); err != nil {
+		return err
+	}
+
 	if arguments.Arguments["--network"] == "mainnet" {
 
 	} else if arguments.Arguments["--network"] == "testnet" {
@@ -110,6 +116,12 @@ func InitConfig() (err error) {
 
 	if arguments.Arguments["--light-computations"] == true {
 		LIGHT_COMPUTATIONS = true
+	}
+
+	if arguments.Arguments["--blocks-sync"] != nil {
+		if BLOCKS_SYNC_MAX_DOWNLOAD, err = strconv.ParseUint(arguments.Arguments["--blocks-sync"].(string), 10, 64); err != nil {
+			return
+		}
 	}
 
 	NODE_PROVIDE_EXTENDED_INFO_APP = false

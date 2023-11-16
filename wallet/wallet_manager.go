@@ -652,6 +652,7 @@ func (self *wallet) ScanAddresses() error {
 		var reg *registration.Registration
 		var plainAcc *plain_account.PlainAccount
 
+		fails := 0
 		for {
 
 			var addr *addresses.Address
@@ -662,26 +663,28 @@ func (self *wallet) ScanAddresses() error {
 			if reg, err = dataStorage.Regs.Get(string(addr.PublicKey)); err != nil {
 				return
 			}
-
-			if reg != nil {
-				if _, err = self.AddNewAddress(false, "", reg.Staked, reg.SpendPublicKey != nil, true); err != nil {
-					return
-				}
-				continue
-			}
-
 			if plainAcc, err = dataStorage.PlainAccs.Get(string(addr.PublicKey)); err != nil {
 				return
 			}
 
-			if plainAcc != nil {
-				if _, err = self.AddNewAddress(false, "", false, false, true); err != nil {
+			if reg != nil || plainAcc != nil {
+				for i := 0; i < fails; i++ {
+					if _, err = self.AddNewAddress(false, "", false, false, true); err != nil {
+						return
+					}
+				}
+				if _, err = self.AddNewAddress(false, "", reg != nil && reg.Staked, reg != nil && reg.SpendPublicKey != nil, true); err != nil {
 					return
 				}
+				fails = 0
 				continue
 			}
 
-			break
+			fails++
+			if fails > 100 {
+				break
+			}
+
 		}
 
 		for i := len(self.Addresses) - 1; i > 0; i-- {

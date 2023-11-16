@@ -10,11 +10,11 @@ type ConditionalPayment struct {
 	Key                []byte   `json:"-" msgpack:"-"` //hashmap key
 	BlockHeight        uint64   `json:"-" msgpack:"-"` //collection height
 	Index              uint64   `json:"-" msgpack:"-"` //hashmap Index
-	Version            uint64   `json:"version"`
+	Version            uint64   `json:"version" msgpack:"version"`
 	TxId               []byte   `json:"txId" msgpack:"txId"`
 	PayloadIndex       byte     `json:"payloadIndex" msgpack:"payloadIndex"`
 	Processed          bool     `json:"processed" msgpack:"processed"`
-	Asset              []byte   `json:"asset"`
+	Asset              []byte   `json:"asset" msgpack:"asset"`
 	DefaultResolution  bool     `json:"defaultResolution" msgpack:"defaultResolution"`
 	ReceiverPublicKeys [][]byte `json:"receiverPublicKeys" msgpack:"receiverPublicKeys"`
 	ReceiverAmounts    [][]byte `json:"receiverAmounts" msgpack:"receiverAmounts"`
@@ -50,19 +50,36 @@ func (this *ConditionalPayment) Validate() error {
 	default:
 		return errors.New("Invalid Version")
 	}
-	for _, p := range this.ReceiverPublicKeys {
-		if len(p) != cryptography.PublicKeySize {
-			return errors.New("PendingStake PublicKey size is invalid")
+
+	if len(this.ReceiverPublicKeys) != len(this.SenderPublicKeys) || len(this.ReceiverAmounts) != len(this.SenderAmounts) || len(this.ReceiverPublicKeys) != len(this.ReceiverAmounts) {
+		return errors.New("Invalid length of conditional payment")
+	}
+
+	if this.Processed {
+		if len(this.ReceiverPublicKeys) > 0 {
+			return errors.New("Conditional payment length should be zero")
+		}
+	} else {
+
+		if len(this.ReceiverPublicKeys) == 0 {
+			return errors.New("Conditional payment length should not be zero")
+		}
+
+		for _, p := range this.ReceiverPublicKeys {
+			if len(p) != cryptography.PublicKeySize {
+				return errors.New("PendingStake PublicKey size is invalid")
+			}
+		}
+		for _, p := range this.SenderPublicKeys {
+			if len(p) != cryptography.PublicKeySize {
+				return errors.New("PendingStake PublicKey size is invalid")
+			}
+		}
+		if this.MultisigThreshold == 0 || int(this.MultisigThreshold) > len(this.MultisigPublicKeys) {
+			return errors.New("Invalid Multisig threshold")
 		}
 	}
-	for _, p := range this.SenderPublicKeys {
-		if len(p) != cryptography.PublicKeySize {
-			return errors.New("PendingStake PublicKey size is invalid")
-		}
-	}
-	if this.MultisigThreshold == 0 || int(this.MultisigThreshold) > len(this.MultisigPublicKeys) {
-		return errors.New("Invali Multisig threshold")
-	}
+
 	unique := make(map[string]bool)
 	for i := range this.MultisigPublicKeys {
 		unique[string(this.MultisigPublicKeys[i])] = true
@@ -115,6 +132,7 @@ func (this *ConditionalPayment) Deserialize(r *advanced_buffers.BufferReader) (e
 	if this.Processed, err = r.ReadBool(); err != nil {
 		return
 	}
+
 	if !this.Processed {
 		if this.Asset, err = r.ReadAsset(); err != nil {
 			return

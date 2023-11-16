@@ -198,7 +198,7 @@ func (thread *ConsensusProcessForksThread) downloadRemainingBlocks(fork *Fork) b
 	fork.Lock()
 	defer fork.Unlock()
 
-	for i := uint64(0); i < config.FORK_MAX_DOWNLOAD; i++ {
+	for i := uint64(0); i < config.BLOCKS_SYNC_MAX_DOWNLOAD; i++ {
 
 		if fork.Current == fork.End {
 			break

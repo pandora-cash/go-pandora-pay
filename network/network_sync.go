@@ -1,6 +1,7 @@
 package network
 
 import (
+	"math/rand"
 	"pandora-pay/config"
 	"pandora-pay/gui"
 	"pandora-pay/helpers/recovery"
@@ -42,6 +43,7 @@ func (this *networkType) continuouslyConnectingNewPeers() {
 		recovery.SafeGo(func() {
 
 			for {
+				notNow := rand.Intn(1800) != 0 //3 minutes
 
 				if websocks.Websockets.GetClients() >= network_config.WEBSOCKETS_NETWORK_CLIENTS_MAX {
 					time.Sleep(500 * time.Millisecond)
@@ -65,6 +67,9 @@ func (this *networkType) continuouslyConnectingNewPeers() {
 
 					if banned_nodes.BannedNodes.IsBanned(knownNode.URL) {
 						known_nodes.KnownNodes.RemoveKnownNode(knownNode)
+						continue
+					} else if knownNode.GetScore() < known_node.KNOWN_KNODE_SCORE_MINIMUM_DELAY && notNow { //3 minutes
+						continue
 					} else {
 						_, err := websocks.Websockets.NewWebsocketClient(knownNode)
 						if err != nil {

@@ -29,6 +29,7 @@ import (
 	"pandora-pay/wallet/wallet_address"
 	"pandora-pay/wallet/wallet_address/shared_staked"
 	"strconv"
+	"time"
 )
 
 type addressAsset struct {
@@ -294,33 +295,35 @@ func (self *wallet) initWalletCLI() {
 			Asset   []byte `json:"asset"`
 		}
 		type exportAddress struct {
-			Name              string `json:"name"`
-			Address           string `json:"address"`
-			AddressRegistered string `json:"addressRegistered"`
-			Assets            []*exportAddressAsset
-			Registration      *registration.Registration
-			PlainAcc          *plain_account.PlainAccount
+			Name         string                      `json:"name,omitempty"`
+			Address      string                      `json:"address"`
+			Assets       []*exportAddressAsset       `json:"assets,omitempty"`
+			Registration *registration.Registration  `json:"registration,omitempty"`
+			PlainAcc     *plain_account.PlainAccount `json:"plainAcc,omitempty"`
 		}
 
 		exportedAddresses := make([]*exportAddress, len(addresses))
 
 		var decrypted uint64
-		for i, address := range addresses {
+		for i, addr := range addresses {
 
 			exportedAddresses[i] = &exportAddress{
-				address.name,
-				address.addressString,
-				address.addressRegisteredString,
-				make([]*exportAddressAsset, len(address.assetsList)),
-				address.registration,
-				address.plainAcc,
+				addr.name,
+				addr.addressString,
+				make([]*exportAddressAsset, len(addr.assetsList)),
+				addr.registration,
+				addr.plainAcc,
+			}
+
+			if addresses[i].registration != nil {
+				exportedAddresses[i].Address = addr.addressRegisteredString
 			}
 
 			for j, data := range addresses[i].assetsList {
 
 				gui.GUI.Info2Update("Decrypting", "")
 
-				if decrypted, err = self.DecryptBalanceByPublicKey(address.publicKey, data.balance.Serialize(), data.assetId, false, 0, true, true, ctx, func(status string) {
+				if decrypted, err = self.DecryptBalanceByPublicKey(addr.publicKey, data.balance.Serialize(), data.assetId, false, 0, true, true, ctx, func(status string) {
 					gui.GUI.Info2Update("Decrypted", status)
 				}); err != nil {
 					return
@@ -330,6 +333,11 @@ func (self *wallet) initWalletCLI() {
 					decrypted,
 					data.assetId,
 				}
+			}
+
+			if i%100 == 0 {
+				gui.GUI.OutputWrite("Exporting address", i)
+				time.Sleep(10 * time.Millisecond)
 			}
 
 		}

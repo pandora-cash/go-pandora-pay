@@ -119,6 +119,9 @@ func (blkComplete *BlockComplete) Deserialize(r *advanced_buffers.BufferReader) 
 	if txsCount, err = r.ReadUvarint(); err != nil {
 		return
 	}
+	if txsCount > 1000 {
+		return errors.New("too many transactions")
+	}
 
 	blkComplete.Txs = make([]*transaction.Transaction, txsCount)
 	for i := uint64(0); i < txsCount; i++ {

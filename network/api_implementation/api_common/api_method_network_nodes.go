@@ -8,7 +8,6 @@ import (
 	"pandora-pay/network/known_nodes/known_node"
 	"pandora-pay/network/network_config"
 	"pandora-pay/store/min_max_heap"
-	"sync/atomic"
 	"time"
 )
 
@@ -57,7 +56,7 @@ func (api *APICommon) GetList(reply *APINetworkNodesReply) (err error) {
 		allKnowNodes := map[string]*known_node.KnownNodeScored{}
 
 		for _, knownNode := range knownList {
-			if err = maxHeap.Insert(float64(atomic.LoadInt32(&knownNode.Score)), []byte(knownNode.URL)); err != nil {
+			if err = maxHeap.Insert(float64(knownNode.GetScore()), []byte(knownNode.URL)); err != nil {
 				return
 			}
 			allKnowNodes[knownNode.URL] = knownNode
@@ -76,7 +75,7 @@ func (api *APICommon) GetList(reply *APINetworkNodesReply) (err error) {
 				node := allKnowNodes[string(element.Key)]
 				newTemporaryList.Nodes[index] = &APINetworkNode{
 					node.URL,
-					int(atomic.LoadInt32(&node.Score)),
+					int(node.GetScore()),
 				}
 				includedMap[node.URL] = true
 				index += 1
@@ -96,7 +95,7 @@ func (api *APICommon) GetList(reply *APINetworkNodesReply) (err error) {
 
 					newTemporaryList.Nodes[index] = &APINetworkNode{
 						node.URL,
-						int(atomic.LoadInt32(&node.Score)),
+						int(node.GetScore()),
 					}
 					index += 1
 					break

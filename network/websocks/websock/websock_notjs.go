@@ -9,7 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"pandora-pay/config/arguments"
+	"pandora-pay/config"
 )
 
 type Conn struct {
@@ -19,19 +19,31 @@ type Conn struct {
 func Dial(URL string) (*Conn, error) {
 
 	//tcp proxy
+	useProxy := false
+
 	var dialer *websocket.Dialer
-	if arguments.Arguments["--tcp-proxy"] != nil {
+	if config.TCP_PROXY_URL != nil {
 
-		u, err := url.Parse(arguments.Arguments["--tcp-proxy"].(string)) // some not-exist-proxy
+		useProxy = true
+
+		if config.TCP_PROXY_BYPASS_LOCALHOST {
+			u, err := url.Parse(URL)
+			if err != nil {
+				return nil, err
+			}
+			hostname := u.Hostname()
+			if hostname == "localhost" || hostname == "127.0.0.1" {
+				useProxy = false
+			}
+		}
+
+	}
+
+	if useProxy {
+		netDialer, err := proxy.FromURL(config.TCP_PROXY_URL, &net.Dialer{})
 		if err != nil {
 			return nil, err
 		}
-
-		netDialer, err := proxy.FromURL(u, &net.Dialer{})
-		if err != nil {
-			return nil, err
-		}
-
 		dialer = &websocket.Dialer{NetDial: netDialer.Dial}
 	} else {
 		dialer = websocket.DefaultDialer

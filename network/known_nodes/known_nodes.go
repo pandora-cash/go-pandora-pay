@@ -97,7 +97,7 @@ func (this *KnownNodesType) MarkKnownNodeConnected(knownNode *known_node.KnownNo
 func (this *KnownNodesType) MarkKnownNodeDisconnected(knownNode *known_node.KnownNodeScored) {
 	this.knownNotConnectedMaxHeapMutex.Lock()
 	defer this.knownNotConnectedMaxHeapMutex.Unlock()
-	this.knownNotConnectedMaxHeap.Update(float64(atomic.LoadInt32(&knownNode.Score)), []byte(knownNode.URL))
+	this.knownNotConnectedMaxHeap.Update(float64(knownNode.GetScore()), []byte(knownNode.URL))
 }
 
 func (this *KnownNodesType) AddKnownNode(newUrl string, isSeed bool) (*known_node.KnownNodeScored, error) {
@@ -119,13 +119,11 @@ func (this *KnownNodesType) AddKnownNode(newUrl string, isSeed bool) (*known_nod
 		return nil, errors.New("url is banned")
 	}
 
-	knownNode := &known_node.KnownNodeScored{
-		KnownNode: known_node.KnownNode{
+	knownNode := known_node.NewKnownNodeScored(
+		&known_node.KnownNode{
 			URL:    newUrl,
 			IsSeed: isSeed,
-		},
-		Score: 0,
-	}
+		})
 
 	if _, exists := this.knownMap.LoadOrStore(newUrl, knownNode); exists {
 		return nil, errors.New("Already exists")
@@ -200,17 +198,15 @@ func (this *KnownNodesType) Reset(urls []string, isSeed bool) (err error) {
 			continue
 		}
 
-		knownNode := &known_node.KnownNodeScored{
-			KnownNode: known_node.KnownNode{
+		knownNode := known_node.NewKnownNodeScored(
+			&known_node.KnownNode{
 				URL:    url,
 				IsSeed: isSeed,
-			},
-			Score: 0,
-		}
+			})
 
 		this.knownMap.LoadOrStore(url, knownNode)
 		this.knownList = append(this.knownList, knownNode)
-		if err = this.knownNotConnectedMaxHeap.Update(float64(knownNode.Score), []byte(url)); err != nil {
+		if err = this.knownNotConnectedMaxHeap.Update(float64(knownNode.GetScore()), []byte(url)); err != nil {
 			return
 		}
 
